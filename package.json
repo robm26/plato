@@ -1,0 +1,24 @@
+{
+  "name": "plato",
+  "description": "DynamoDB data and traffic generator",
+  "version": "1.0.0",
+  "main": "play.js",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.298.0",
+    "@aws-sdk/lib-dynamodb": "^3.303.0"
+  },
+  "scripts": {
+    "test": "node test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robm26/plato.git"
+  },
+  "author": "mccaul@amazon.com",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/robm26/plato/issues"
+  },
+  "homepage": "https://github.com/robm26/plato#readme"
+}

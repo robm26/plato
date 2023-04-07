@@ -1,0 +1,11 @@
+{ "TableName": "DemoTable02",
+  "Tags": [{"Key": "table_name", "Value": "DemoTable02"}],
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    {"AttributeName": "ContractID", "AttributeType": "S"},
+    {"AttributeName": "Version", "AttributeType": "S"}
+  ],
+   "KeySchema": [
+     {"KeyType": "HASH", "AttributeName": "ContractID"},
+     {"KeyType": "RANGE", "AttributeName": "Version"}]
+}
