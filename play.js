@@ -2,21 +2,23 @@
 // call with arguments for tape file and target table, e.g. :
 //   node play tape1 table1
 
-import { DynamoDBClient, PutItemCommand, DescribeTableCommand } from "@aws-sdk/client-dynamodb";
-
-
 const settings = {
     countMax: 1000,
     secondsMax: 20,
     region: 'us-west-1',
     localhost: false,
-    csv: false,
-    secondSummary: true,
-    debug: false,
     dynamodb: {
-        maxAttempts: 5
-    }
+        maxAttempts: 4
+    },
+    csv: false,
+    perSecondSummary: true,
+    stopOnError: false,
+    debug: false,
+    write: true,
 };
+
+import { DynamoDBClient, PutItemCommand, DescribeTableCommand } from "@aws-sdk/client-dynamodb";
+
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -48,10 +50,12 @@ let writeEndTime;
 let thisSecond;
 let lastSecond;
 let durationIndex = 0;
+let jobSecond = 0;
 let cuThisSecond = 0;
 let itemsThisSecond = 0;
 let retryAttempts = 0;
 let retryAttemptsTotal = 0;
+let failedRecords = [];
 
 let stopStatus = 'go';
 let ccu = 0;
@@ -83,7 +87,7 @@ const SKtype = KeySchema.length === 2 ? AttributeDefinitions.filter(ix => ix.Att
 
 console.log(fontColors.Dim +  'Partition key : ' + fontColors.Reset + fontColors.FgCyan + PKname + fontColors.Reset);
 if(SKname) {
-    console.log( '     Sort key : ' + fontColors.FgGreen + SKname + fontColors.Reset);
+    console.log(fontColors.Dim + '     Sort key : ' + fontColors.Reset + fontColors.FgGreen + SKname + fontColors.Reset);
 }
 
 // const mode = metadata['Table']['BillingModeSummary']['BillingMode']
@@ -121,7 +125,7 @@ for (let i = 1; i <= settings.countMax && stopStatus === 'go'; i++) {
 
     let newItem = tape.rowMaker(i);
 
-    if (newItem && errorCount === 0) {
+    if (newItem && (errorCount === 0 || !settings.stopOnError)  ) {
 
         const PKval = newItem[PKname][Object.keys(newItem[PKname])[0]];
         const SKval = SKname ? newItem[SKname][Object.keys(newItem[SKname])[0]] : null;
@@ -141,37 +145,39 @@ for (let i = 1; i <= settings.countMax && stopStatus === 'go'; i++) {
 
         let response;
 
-            writeStartTime = Date.now();
+        writeStartTime = Date.now();
 
-            const newSecond = Math.floor(writeStartTime/1000) !== thisSecond;
-            const gap = Math.floor(writeStartTime/1000) - thisSecond;
+        const newSecond = Math.floor(writeStartTime/1000) !== thisSecond;
+        const gap = Math.floor(writeStartTime/1000) - thisSecond;
 
-            if(newSecond && thisSecond) {
-                durationIndex += 1;
-                const jobSecond = (thisSecond - startTimeEpoch);
-                const jobSecondLabel = jobSecond < 10 ? ' ' + jobSecond : jobSecond;
+        if(newSecond && thisSecond) {
+            durationIndex += 1;
+            jobSecond = (thisSecond - startTimeEpoch);
+            const jobSecondLabel = jobSecond < 10 ? ' ' + jobSecond : jobSecond;
 
+            let secondSummary = 'summary for second ' + jobSecondLabel + ': ';
+            secondSummary += itemsThisSecond + ' items, ' + cuThisSecond + ' WCU/sec';
+            secondSummary += retryAttempts > 0 ? ', ' + retryAttempts + ' retries' : '';
 
-                let secondSummary = jobSecondLabel+ ' summary for ' + thisSecond + ': ';
-                secondSummary += itemsThisSecond + ' items, ' + cuThisSecond + ' WCU/sec';
-                secondSummary += retryAttempts > 0 ? ', ' + retryAttempts + ' retries' : '';
-                if(settings.secondSummary) {
+            if(settings.perSecondSummary) {
 
-                    console.log(secondSummary);
-                    if(gap && gap > 1) {
-                        for(let g=1; g<gap; g++) {
-                            console.log((jobSecond + g < 10 ? ' ' + (jobSecond + g) : jobSecond + g) + ' --');
-                        }
+                console.log(secondSummary);
+
+                if(gap && gap > 1) {
+                    for(let g=1; g<gap; g++) {
+                        console.log((jobSecond + g < 10 ? ' ' + (jobSecond + g) : jobSecond + g) + ' --');
                     }
                 }
-
-
-                cuThisSecond = 0;
-                itemsThisSecond = 1;
-
-            } else {
-                itemsThisSecond += 1;
             }
+
+
+            cuThisSecond = 0;
+            itemsThisSecond = 1;
+
+        } else {
+            itemsThisSecond += 1;
+        }
+
 
         try {
             /// *** the actual DynamoDB write
@@ -180,17 +186,23 @@ for (let i = 1; i <= settings.countMax && stopStatus === 'go'; i++) {
             thisSecond = Math.floor(writeStartTime/1000);
 
             // the actual DynamoDB write operation
-            try {
-                response = await client.send(command);
+            if(settings.write) {
+                try {
+                    response = await client.send(command);
 
-            } catch (ee) {
+                } catch (ee) {
+                    let errorName = ee['name'];
+                    let httpStatus = ee['$metadata']['httpStatusCode'];
+                    console.error( '    ' + fontColors.FgRed + 'http-' + httpStatus + ' ' + errorName + fontColors.Reset);
+                    errorCount += 1;
+                    const failedKey = {};
+                    failedKey[PKname] = PKval;
+                    if(SKname) {
+                        failedKey[SKname] = SKval;
+                    }
+                    failedRecords.push(failedKey);
 
-                // console.log('^^^^^ ee ');
-                let errorName = ee['name'];
-                let httpStatus = ee['$metadata']['httpStatusCode'];
-                console.error('\nError: HTTP-' + httpStatus + ' ' + errorName + ' on ' + targetTable);
-                errorCount += 1;
-
+                }
             }
 
 
@@ -254,12 +266,23 @@ const itemsPerSecond = Math.floor(countWritten * 10 / durationSeconds)/10;
 
 console.log();
 console.log(fontColors.Dim + 'end time      : ' + fontColors.Reset + endTimeEpoch );
-console.log(fontColors.Dim + 'duration      : ' + fontColors.Reset + durationSeconds);
-
-console.log(fontColors.Dim + 'Items written : ' + fontColors.Reset +  countWritten);
-console.log(fontColors.Dim + 'Items/second  : ' + fontColors.Reset +  itemsPerSecond);
+console.log(fontColors.Dim + 'duration (sec): ' + fontColors.Reset + durationSeconds);
 console.log(fontColors.Dim + 'WCU Consumed  : ' + fontColors.Reset + ccu );
+console.log(fontColors.Dim + 'Items/second  : ' + fontColors.Reset +  itemsPerSecond);
+console.log(fontColors.Dim + 'Items written : ' + fontColors.Reset +  countWritten);
+console.log(fontColors.Dim + 'Errors        : ' + fontColors.Reset +  failedRecords.length);
+console.log(fontColors.Dim + 'Retries       : ' + fontColors.Reset +  retryAttemptsTotal);
+
 console.log();
+if(failedRecords.length > 0) {
+    console.log(fontColors.FgRed + 'Failed Records:' + fontColors.Reset);
+    // console.log(failedRecords);
+    failedRecords.forEach(r => {
+        console.log(r[PKname] + (SKname ? ' : ' + r[SKname] : ''));
+    });
+    console.log();
+}
+
 
 async function getTableMetaData(tn) {
     let params = {

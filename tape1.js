@@ -1,31 +1,32 @@
 
-
 let settings = {
-    iterations: 100,
+    items: 3,
     pkPrefix: 'c',
-    cities: ['Boston', 'New York', 'New York', 'Philadelphia', 'Chicago']
+    cities: ['Boston', 'New York', 'New York', 'Philadelphia', 'Chicago', null, null]
 };
 
-import { md5, randomString, payloadData } from './util.js';
+import { md5, payloadData, randomChoiceSeeded } from './util.js';
 
 const rowMaker = (tick) => {
 
-    if(tick > settings.iterations) {
+    if(tick > settings.items) {
         return undefined;
     }
 
     const ContractID = settings.pkPrefix + md5(tick.toString()).slice(-6);
 
-    const city = settings.cities[Math.floor(Math.random()*settings.cities.length)];
+    const city = randomChoiceSeeded(settings.cities, tick);
 
-    const itemText = payloadData(0.8, 'text');
+    const itemText = payloadData('text', .2);
 
     const newItem = {
             "ContractID": {"S": ContractID},
-            "tick": {"N" : tick.toString()},
-            "city": {"S": city},
-            "body": {"S": itemText},
+            "body": {"S": itemText}
     };
+
+    if(city) {
+        newItem['city'] = {"S": city};
+    }
 
     return newItem ;
 

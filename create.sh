@@ -7,12 +7,13 @@ ENDPOINTURL=https://dynamodb.$REGION.amazonaws.com
 
 OUTPUT=text
 
-TableList=("DemoTable01" "DemoTable02" "DemoTable03")
+TableList=("DemoTable01" "DemoTable02" "DemoTable03" "DemoTable04")
 TableName=""
 
 
 if [ $# -gt 0 ]
   then
+    TableName=$1
     aws dynamodb create-table --cli-input-json "file://tables/$1.json" --region $REGION --endpoint-url $ENDPOINTURL --output $OUTPUT --query 'TableDescription.TableArn'
   else
 
